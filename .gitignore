@@ -1,0 +1,67 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Flask/runtime output
+instance/
+*.log
+logs/
+uploads/
+static/uploads/
+
+# Data science artifacts
+data/
+datasets/
+raw/
+processed/
+outputs/
+runs/
+checkpoints/
+model/
+models/
+
+# Trained model weights
+*.pth
+*.pt
+*.h5
+*.keras
+*.onnx
+*.pkl
+*.joblib
+
+# Large compressed/data files
+*.zip
+*.rar
+*.7z
+*.tar
+*.tar.gz
+*.csv
+*.tsv
+*.jsonl
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

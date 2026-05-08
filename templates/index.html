@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="id">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Deteksi Gender dan Estimasi Usia</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260508-accuracy2">
+    <script defer src="{{ url_for('static', filename='app.js') }}?v=20260508-accuracy2"></script>
+</head>
+<body>
+    <header class="app-header">
+        <div class="header-title">
+            <span class="app-badge">CNN Vision</span>
+            <h1>Deteksi Gender dan Estimasi Usia</h1>
+        </div>
+        <div class="header-actions">
+            <span class="status-chip {{ 'ready' if model_ready else 'error' }}">
+                {{ 'Model siap' if model_ready else 'Model belum siap' }}
+            </span>
+        </div>
+    </header>
+
+    <main class="layout">
+        <section class="summary-grid" aria-label="Ringkasan sistem">
+            <article class="summary-card">
+                <span>Model</span>
+                <strong>{{ model_status }}</strong>
+            </article>
+            <article class="summary-card">
+                <span>Face Detector</span>
+                <strong id="faceDetectorName">{{ face_detector }}</strong>
+            </article>
+            <article class="summary-card">
+                <span>Device</span>
+                <strong>{{ device }}</strong>
+            </article>
+            <article class="summary-card">
+                <span>Input</span>
+                <strong>{{ image_size }} x {{ image_size }}</strong>
+            </article>
+        </section>
+
+        <section class="content-grid">
+            <section class="workspace-card">
+                <div class="section-head">
+                    <div>
+                        <h2>Kamera Live</h2>
+                        <p>Prediksi realtime dari kamera perangkat.</p>
+                    </div>
+                    <label class="camera-select" for="cameraMode">
+                        <span>Kamera</span>
+                        <select id="cameraMode">
+                            <option value="user">Depan</option>
+                            <option value="environment">Belakang</option>
+                        </select>
+                    </label>
+                </div>
+
+                <div class="camera-stage">
+                    <video id="cameraVideo" playsinline muted></video>
+                    <canvas id="overlayCanvas" aria-hidden="true"></canvas>
+                    <div class="camera-hud">
+                        <span id="cameraStatus">Menunggu kamera</span>
+                        <span id="faceCounter">0 wajah</span>
+                    </div>
+                    <div id="cameraEmpty" class="camera-empty">
+                        <strong>Kamera belum aktif</strong>
+                        <span>Tekan Mulai Kamera untuk memulai stream.</span>
+                    </div>
+                </div>
+
+                <div class="camera-controls">
+                    <button id="startCamera" type="button" class="primary">Mulai Kamera</button>
+                    <button id="stopCamera" type="button" class="secondary" disabled>Matikan Kamera</button>
+                </div>
+
+                <div class="live-panel">
+                    <div class="section-label">Hasil Live</div>
+                    <div id="liveResults" class="result-list empty">
+                        Belum ada prediksi.
+                    </div>
+                </div>
+            </section>
+
+            <aside class="side-panel">
+                <section class="panel-card">
+                    <div class="section-head compact">
+                        <div>
+                            <h2>Upload Gambar</h2>
+                            <p>Prediksi dari file gambar.</p>
+                        </div>
+                    </div>
+
+                    <form action="{{ url_for('predict_upload') }}" method="post" enctype="multipart/form-data" class="upload-form">
+                        <label class="file-drop" for="imageInput">
+                            <span class="file-title">Pilih gambar</span>
+                            <span id="fileName" class="file-name">JPG, PNG, WEBP sampai {{ max_upload_mb }} MB</span>
+                        </label>
+                        <input id="imageInput" type="file" name="image" accept="image/*" required>
+                        <button type="submit" class="primary full">Prediksi Upload</button>
+                    </form>
+                </section>
+
+                <section class="panel-card">
+                    <div class="section-head compact">
+                        <div>
+                            <h2>Status Sistem</h2>
+                            <p>Konfigurasi runtime aplikasi.</p>
+                        </div>
+                    </div>
+                    <dl class="status-grid">
+                        <div>
+                            <dt>Model</dt>
+                            <dd>{{ model_status }}</dd>
+                        </div>
+                        <div>
+                            <dt>Device</dt>
+                            <dd>{{ device }}</dd>
+                        </div>
+                        <div>
+                            <dt>Ukuran Input</dt>
+                            <dd>{{ image_size }} x {{ image_size }}</dd>
+                        </div>
+                        <div>
+                            <dt>Face Detector</dt>
+                            <dd>{{ face_detector }}</dd>
+                        </div>
+                    </dl>
+                    <button id="refreshStatus" type="button" class="secondary full">Refresh Status</button>
+                    <details class="json-details">
+                        <summary>JSON Status</summary>
+                        <pre id="statusJson" class="json-box"></pre>
+                    </details>
+                </section>
+            </aside>
+        </section>
+    </main>
+</body>
+</html>

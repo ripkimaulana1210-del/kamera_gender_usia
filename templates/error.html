@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="id">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Terjadi Kesalahan</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <header class="topbar">
+        <div>
+            <p class="eyebrow">Error</p>
+            <h1>Permintaan Tidak Bisa Diproses</h1>
+        </div>
+        <a class="link-button" href="{{ url_for('index') }}">Kembali</a>
+    </header>
+
+    <main class="page result-page">
+        <section class="panel">
+            <h2>Detail</h2>
+            <p class="error-message">{{ message }}</p>
+        </section>
+    </main>
+</body>
+</html>

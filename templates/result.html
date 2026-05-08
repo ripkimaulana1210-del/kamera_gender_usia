@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="id">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Hasil Prediksi</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260508-accuracy2">
+</head>
+<body>
+    <header class="app-header">
+        <div class="header-title">
+            <span class="app-badge">Upload Result</span>
+            <h1>Hasil Prediksi Gambar</h1>
+        </div>
+        <div class="header-actions">
+            <a class="link-button" href="{{ url_for('index') }}">Kembali</a>
+        </div>
+    </header>
+
+    <main class="layout">
+        <section class="content-grid result-layout">
+            <section class="workspace-card">
+                <div class="section-head">
+                    <div>
+                        <h2>Gambar Teranotasi</h2>
+                        {% if used_full_image %}
+                            <p>Wajah tidak terdeteksi, prediksi memakai gambar penuh.</p>
+                        {% else %}
+                            <p>{{ face_count }} wajah terdeteksi.</p>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="result-frame">
+                    <img class="result-image" src="data:image/jpeg;base64,{{ image_data }}" alt="Hasil prediksi">
+                </div>
+            </section>
+
+            <aside class="side-panel">
+                <section class="panel-card">
+                    <div class="section-head compact">
+                        <div>
+                            <h2>Ringkasan</h2>
+                            <p>Hasil prediksi setiap wajah.</p>
+                        </div>
+                    </div>
+                    <div class="result-list">
+                        {% for prediction in predictions %}
+                            <article class="result-item {{ 'warning' if prediction.quality_ok == false else '' }}">
+                                {% if prediction.quality_ok == false %}
+                                    <div>
+                                        <strong>Input belum layak</strong>
+                                        <span>{{ prediction.quality_message }}</span>
+                                    </div>
+                                    <span class="confidence warning">Cek kualitas</span>
+                                {% else %}
+                                    <div>
+                                        <strong>Gender: {{ prediction.gender }}</strong>
+                                        <span>Estimasi usia: {{ prediction.age_range }} tahun</span>
+                                    </div>
+                                    <span class="confidence">Confidence Gender {{ "%.1f"|format(prediction.confidence_percent) }}%</span>
+                                {% endif %}
+                            </article>
+                        {% endfor %}
+                    </div>
+                </section>
+            </aside>
+        </section>
+    </main>
+</body>
+</html>
