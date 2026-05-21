@@ -15,9 +15,17 @@ const fileName = document.getElementById("fileName");
 const refreshStatus = document.getElementById("refreshStatus");
 const statusJson = document.getElementById("statusJson");
 const faceDetectorName = document.getElementById("faceDetectorName");
+const modelStatusChip = document.getElementById("modelStatusChip");
+const modelStatusText = document.getElementById("modelStatusText");
+const modelPanelHint = document.getElementById("modelPanelHint");
+const modelMeterTitle = document.getElementById("modelMeterTitle");
+const modelMeterSub = document.getElementById("modelMeterSub");
+const modelMeter = document.querySelector(".model-meter");
+const liveSignal = document.getElementById("liveSignal");
 
 const captureCanvas = document.createElement("canvas");
 const SMOOTHING_WINDOW = 5;
+let modelReady = document.body.classList.contains("model-loaded");
 let stream = null;
 let predictInterval = null;
 let isPredicting = false;
@@ -26,6 +34,12 @@ let faceHistory = [];
 
 function setCameraState(message) {
     cameraStatus.textContent = message;
+}
+
+function setLiveSignal(message) {
+    if (liveSignal) {
+        liveSignal.textContent = message;
+    }
 }
 
 function escapeHtml(value) {
@@ -43,10 +57,12 @@ function updateResults(faces) {
     if (!faces.length) {
         liveResults.classList.add("empty");
         liveResults.textContent = "Wajah belum terdeteksi.";
+        setLiveSignal(stream ? "Scanning" : "Standby");
         return;
     }
 
     liveResults.classList.remove("empty");
+    setLiveSignal(`${faces.length} wajah terdeteksi`);
     liveResults.innerHTML = faces.map((face) => `
         <article class="result-item ${face.quality_ok === false ? "warning" : ""}">
             ${face.quality_ok === false ? `
@@ -60,7 +76,10 @@ function updateResults(faces) {
                     <strong>Gender: ${escapeHtml(face.gender)}</strong>
                     <span>Estimasi usia: ${escapeHtml(face.age_range)} tahun</span>
                 </div>
-                <span class="confidence">Confidence Gender ${Number(face.confidence_percent).toFixed(1)}%</span>
+                <span class="confidence confidence-stack">
+                    <span>Confidence Gender ${Number(face.confidence_percent).toFixed(1)}%</span>
+                    <span class="confidence-track"><span style="width: ${Math.max(0, Math.min(100, Number(face.confidence_percent))).toFixed(1)}%"></span></span>
+                </span>
             `}
         </article>
     `).join("");
@@ -165,6 +184,11 @@ function drawOverlay(response) {
 }
 
 async function startCamera() {
+    if (!modelReady) {
+        setCameraState("Upload model terlebih dahulu.");
+        return;
+    }
+
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         setCameraState("Browser tidak mendukung kamera.");
         return;
@@ -186,6 +210,7 @@ async function startCamera() {
         await video.play();
 
         cameraStage.classList.add("active");
+        document.body.classList.add("camera-running");
         cameraEmpty.hidden = true;
         startButton.disabled = true;
         stopButton.disabled = false;
@@ -217,10 +242,13 @@ function stopCamera() {
     drawOverlay(null);
     updateResults([]);
     cameraStage.classList.remove("active");
+    document.body.classList.remove("camera-running");
     cameraEmpty.hidden = false;
     startButton.disabled = false;
+    startButton.disabled = !modelReady;
     stopButton.disabled = true;
     setCameraState("Kamera mati");
+    setLiveSignal("Standby");
 }
 
 async function predictCurrentFrame() {
@@ -266,8 +294,54 @@ async function predictCurrentFrame() {
         setCameraState(smoothedFaces.length ? "Prediksi stabil berjalan" : "Mencari wajah");
     } catch (error) {
         setCameraState(error.message);
+        setLiveSignal("Perlu perhatian");
     } finally {
         isPredicting = false;
+    }
+}
+
+function setModelUi(data) {
+    modelReady = Boolean(data.model_ready);
+    document.body.classList.toggle("model-loaded", modelReady);
+    document.body.classList.toggle("model-empty", !modelReady);
+
+    if (modelStatusChip) {
+        modelStatusChip.classList.toggle("ready", modelReady);
+        modelStatusChip.classList.toggle("error", !modelReady);
+        modelStatusChip.textContent = modelReady ? "Model siap" : "Model belum siap";
+    }
+
+    const statusText = modelReady
+        ? `${data.model_name || "Model"} siap digunakan${data.model_source ? ` dari ${data.model_source}` : ""}`
+        : `Model belum siap: ${data.model_error || "Upload file model .pth atau .pt terlebih dahulu."}`;
+
+    if (modelStatusText) {
+        modelStatusText.textContent = statusText;
+    }
+
+    if (modelPanelHint) {
+        modelPanelHint.textContent = modelReady ? "Model aktif di sesi ini." : "Menunggu file model.";
+    }
+
+    if (modelMeter) {
+        modelMeter.classList.toggle("ready", modelReady);
+        modelMeter.classList.toggle("pending", !modelReady);
+        const meterCore = modelMeter.querySelector(".meter-core span");
+        if (meterCore) {
+            meterCore.textContent = modelReady ? "ON" : "OFF";
+        }
+    }
+
+    if (modelMeterTitle) {
+        modelMeterTitle.textContent = modelReady ? "Inference aktif" : "Inference nonaktif";
+    }
+
+    if (modelMeterSub) {
+        modelMeterSub.textContent = statusText;
+    }
+
+    if (!stream) {
+        startButton.disabled = !modelReady;
     }
 }
 
@@ -276,6 +350,7 @@ async function loadStatus() {
         const response = await fetch("/status");
         const data = await response.json();
         statusJson.textContent = JSON.stringify(data, null, 2);
+        setModelUi(data);
 
         if (faceDetectorName && data.face_detector) {
             faceDetectorName.textContent = data.face_detector;
@@ -283,6 +358,53 @@ async function loadStatus() {
     } catch (error) {
         statusJson.textContent = JSON.stringify({ error: error.message }, null, 2);
     }
+}
+
+function configureFileDrop(input, label, labelText, fallbackText) {
+    if (!input || !label || !labelText) {
+        return;
+    }
+
+    function updateName() {
+        const file = input.files[0];
+        labelText.textContent = file ? file.name : fallbackText;
+    }
+
+    label.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        label.classList.add("drag-active");
+    });
+
+    label.addEventListener("dragleave", () => {
+        label.classList.remove("drag-active");
+    });
+
+    label.addEventListener("drop", (event) => {
+        event.preventDefault();
+        label.classList.remove("drag-active");
+
+        if (event.dataTransfer.files.length) {
+            input.files = event.dataTransfer.files;
+            updateName();
+        }
+    });
+
+    input.addEventListener("change", updateName);
+}
+
+function bindSubmitState(formSelector, busyText) {
+    const form = document.querySelector(formSelector);
+    if (!form) {
+        return;
+    }
+
+    form.addEventListener("submit", () => {
+        const button = form.querySelector("button[type='submit']");
+        if (button) {
+            button.textContent = busyText;
+            button.disabled = true;
+        }
+    });
 }
 
 startButton.addEventListener("click", startCamera);
@@ -295,14 +417,19 @@ cameraMode.addEventListener("change", () => {
     }
 });
 
-imageInput.addEventListener("change", () => {
-    const file = imageInput.files[0];
-    fileName.textContent = file ? file.name : "JPG, PNG, WEBP";
-});
-
-modelInput.addEventListener("change", () => {
-    const file = modelInput.files[0];
-    modelFileName.textContent = file ? file.name : "PTH atau PT";
-});
+configureFileDrop(
+    imageInput,
+    document.querySelector("label[for='imageInput']"),
+    fileName,
+    "JPG, PNG, WEBP"
+);
+configureFileDrop(
+    modelInput,
+    document.querySelector("label[for='modelInput']"),
+    modelFileName,
+    "PTH atau PT"
+);
+bindSubmitState("form[action$='/model/upload']", "Memuat Model");
+bindSubmitState("form[action$='/predict']", "Memproses Gambar");
 
 window.addEventListener("resize", () => drawOverlay(lastResponse));

@@ -4,48 +4,67 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Deteksi Gender dan Estimasi Usia</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260521-model-upload">
-    <script defer src="{{ url_for('static', filename='app.js') }}?v=20260521-model-upload"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260521-hologram-face">
+    <script defer src="{{ url_for('static', filename='app.js') }}?v=20260521-hologram-face"></script>
 </head>
-<body>
+<body class="{{ 'model-loaded' if model_ready else 'model-empty' }}">
     <header class="app-header">
         <div class="header-title">
-            <span class="app-badge">CNN Vision</span>
-            <h1>Deteksi Gender dan Estimasi Usia</h1>
+            <span class="app-badge">Camera Analytics Console</span>
+            <h1>Dashboard Kamera Gender dan Usia</h1>
         </div>
         <div class="header-actions">
-            <span class="status-chip {{ 'ready' if model_ready else 'error' }}">
+            <span id="modelStatusChip" class="status-chip {{ 'ready' if model_ready else 'error' }}">
                 {{ 'Model siap' if model_ready else 'Model belum siap' }}
             </span>
         </div>
     </header>
 
     <main class="layout">
+        <section class="studio-hero" aria-label="Sesi analisis">
+            <div class="studio-copy">
+                <span class="studio-kicker">Camera Inference Studio</span>
+                <h2>Gender and age vision dashboard</h2>
+                <div class="studio-chip-row" aria-label="Status cepat">
+                    <span class="studio-chip {{ 'ready' if model_ready else 'pending' }}">{{ 'Model Online' if model_ready else 'Model Gate' }}</span>
+                    <span class="studio-chip">Camera Stream</span>
+                    <span class="studio-chip">{{ device|upper }}</span>
+                </div>
+            </div>
+            <div class="analytics-visual" aria-hidden="true">
+                <img
+                    class="hero-face-image"
+                    src="{{ url_for('static', filename='assets/hologram-face-dashboard.png') }}"
+                    alt=""
+                >
+            </div>
+        </section>
+
         <section class="summary-grid" aria-label="Ringkasan sistem">
-            <article class="summary-card">
-                <span>Model</span>
-                <strong>{{ model_status }}</strong>
+            <article class="summary-card model-card">
+                <span>Status Model</span>
+                <strong id="modelStatusText">{{ model_status }}</strong>
             </article>
-            <article class="summary-card">
+            <article class="summary-card detector-card">
                 <span>Face Detector</span>
                 <strong id="faceDetectorName">{{ face_detector }}</strong>
             </article>
-            <article class="summary-card">
+            <article class="summary-card device-card">
                 <span>Device</span>
                 <strong>{{ device }}</strong>
             </article>
-            <article class="summary-card">
+            <article class="summary-card input-card">
                 <span>Input</span>
                 <strong>{{ image_size }} x {{ image_size }}</strong>
             </article>
         </section>
 
         <section class="content-grid">
-            <section class="workspace-card">
+            <section class="workspace-card vision-console">
                 <div class="section-head">
                     <div>
                         <h2>Kamera Live</h2>
-                        <p>Prediksi realtime dari kamera perangkat.</p>
+                        <p id="visionSubtitle">Realtime inference console</p>
                     </div>
                     <label class="camera-select" for="cameraMode">
                         <span>Kamera</span>
@@ -57,6 +76,12 @@
                 </div>
 
                 <div class="camera-stage">
+                    <div class="stage-corners" aria-hidden="true">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
                     <video id="cameraVideo" playsinline muted></video>
                     <canvas id="overlayCanvas" aria-hidden="true"></canvas>
                     <div class="camera-hud">
@@ -64,8 +89,9 @@
                         <span id="faceCounter">0 wajah</span>
                     </div>
                     <div id="cameraEmpty" class="camera-empty">
-                        <strong>Kamera belum aktif</strong>
-                        <span>Tekan Mulai Kamera untuk memulai stream.</span>
+                        <div class="scanner-mark" aria-hidden="true"></div>
+                        <strong>{{ 'Kamera siap' if model_ready else 'Model belum dimuat' }}</strong>
+                        <span>{{ 'Mulai Kamera untuk membuka stream.' if model_ready else 'Upload model terlebih dahulu.' }}</span>
                     </div>
                 </div>
 
@@ -75,7 +101,17 @@
                 </div>
 
                 <div class="live-panel">
-                    <div class="section-label">Hasil Live</div>
+                    <div class="live-panel-head">
+                        <div>
+                            <div class="section-label">Hasil Live</div>
+                            <strong id="liveSignal">Standby</strong>
+                        </div>
+                        <div class="signal-bars" aria-hidden="true">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                        </div>
+                    </div>
                     <div id="liveResults" class="result-list empty">
                         Belum ada prediksi.
                     </div>
@@ -83,16 +119,27 @@
             </section>
 
             <aside class="side-panel">
-                <section class="panel-card">
+                <section class="panel-card model-panel">
                     <div class="section-head compact">
                         <div>
                             <h2>Upload Model</h2>
-                            <p>File model hasil training.</p>
+                            <p id="modelPanelHint">{{ 'Model aktif di sesi ini.' if model_ready else 'Menunggu file model.' }}</p>
+                        </div>
+                    </div>
+
+                    <div class="model-meter {{ 'ready' if model_ready else 'pending' }}">
+                        <div class="meter-core">
+                            <span>{{ 'ON' if model_ready else 'OFF' }}</span>
+                        </div>
+                        <div>
+                            <strong id="modelMeterTitle">{{ 'Inference aktif' if model_ready else 'Inference nonaktif' }}</strong>
+                            <span id="modelMeterSub">{{ model_status }}</span>
                         </div>
                     </div>
 
                     <form action="{{ url_for('upload_model') }}" method="post" enctype="multipart/form-data" class="upload-form">
                         <label class="file-drop" for="modelInput">
+                            <span class="file-glyph" aria-hidden="true"></span>
                             <span class="file-title">Pilih model</span>
                             <span id="modelFileName" class="file-name">PTH atau PT sampai {{ max_model_upload_mb }} MB</span>
                         </label>
@@ -105,12 +152,13 @@
                     <div class="section-head compact">
                         <div>
                             <h2>Upload Gambar</h2>
-                            <p>Prediksi dari file gambar.</p>
+                            <p>Single frame analysis</p>
                         </div>
                     </div>
 
                     <form action="{{ url_for('predict_upload') }}" method="post" enctype="multipart/form-data" class="upload-form">
                         <label class="file-drop" for="imageInput">
+                            <span class="file-glyph image" aria-hidden="true"></span>
                             <span class="file-title">Pilih gambar</span>
                             <span id="fileName" class="file-name">JPG, PNG, WEBP sampai {{ max_upload_mb }} MB</span>
                         </label>
@@ -123,7 +171,7 @@
                     <div class="section-head compact">
                         <div>
                             <h2>Status Sistem</h2>
-                            <p>Konfigurasi runtime aplikasi.</p>
+                            <p>Runtime telemetry</p>
                         </div>
                     </div>
                     <dl class="status-grid">
