@@ -1,6 +1,15 @@
+import atexit
 import base64
+import logging
+import os
 import threading
+import time
+from contextlib import contextmanager
 from pathlib import Path
+
+# Kurangi log native MediaPipe/TensorFlow Lite yang tidak memengaruhi hasil deteksi.
+os.environ.setdefault("GLOG_minloglevel", "2")
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 
 import cv2
 import numpy as np
@@ -9,8 +18,39 @@ from flask import Flask, jsonify, redirect, render_template, request, url_for
 
 try:
     import mediapipe as mp
+    from absl import logging as absl_logging
+
+    absl_logging.set_verbosity(absl_logging.ERROR)
+    absl_logging.set_stderrthreshold("error")
 except ImportError:
     mp = None
+
+
+@contextmanager
+def suppress_native_stderr():
+    stderr_fd = 2
+    saved_stderr_fd = os.dup(stderr_fd)
+
+    try:
+        with open(os.devnull, "w") as devnull:
+            os.dup2(devnull.fileno(), stderr_fd)
+            yield
+    finally:
+        os.dup2(saved_stderr_fd, stderr_fd)
+        os.close(saved_stderr_fd)
+
+
+def close_mediapipe_detectors():
+    if not globals().get("mp_face_detectors"):
+        return
+
+    with suppress_native_stderr():
+        for detector in mp_face_detectors:
+            try:
+                detector.close()
+            except Exception:
+                pass
+
 
 import torch
 import torch.nn as nn
@@ -25,7 +65,7 @@ MODEL_DIR = BASE_DIR / "models"
 MODEL_DIR.mkdir(exist_ok=True)
 UPLOADED_MODEL_PATH = MODEL_DIR / "uploaded_gender_age_model.pth"
 
-IMAGE_SIZE = 128
+IMAGE_SIZE = 224
 AGE_MAX = 116.0
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 GENDER_LABELS = ["Laki-laki", "Perempuan"]
@@ -252,17 +292,24 @@ try:
     )
 
     if has_mediapipe_face_detection:
-        mp_face_detectors = [
-            mp.solutions.face_detection.FaceDetection(
-                model_selection=0,
-                min_detection_confidence=FACE_DETECTION_CONFIDENCE,
-            ),
-            mp.solutions.face_detection.FaceDetection(
-                model_selection=1,
-                min_detection_confidence=FACE_DETECTION_CONFIDENCE,
-            ),
-        ]
+        with suppress_native_stderr():
+            mp_face_detectors = [
+                mp.solutions.face_detection.FaceDetection(
+                    model_selection=0,
+                    min_detection_confidence=FACE_DETECTION_CONFIDENCE,
+                ),
+                mp.solutions.face_detection.FaceDetection(
+                    model_selection=1,
+                    min_detection_confidence=FACE_DETECTION_CONFIDENCE,
+                ),
+            ]
+            warmup_frame = np.zeros((IMAGE_SIZE, IMAGE_SIZE, 3), dtype=np.uint8)
+            warmup_frame.flags.writeable = False
+            for detector in mp_face_detectors:
+                detector.process(warmup_frame)
+            time.sleep(0.5)
         mp_face_detector = mp_face_detectors[0]
+        atexit.register(close_mediapipe_detectors)
         face_detector_name = "MediaPipe Multi-Face + OpenCV Haar"
     elif mp is None:
         face_detector_error = "Package mediapipe belum terpasang."
@@ -274,6 +321,7 @@ except Exception as exc:
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_MODEL_UPLOAD_SIZE
 app.config["TEMPLATES_AUTO_RELOAD"] = True
+logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
 
 # =====================================================
@@ -520,9 +568,13 @@ def detect_faces_mediapipe_bgr(frame_bgr):
     faces = []
 
     with face_detector_lock:
-        for detector in mp_face_detectors:
-            detections = detector.process(frame_rgb).detections
+        with suppress_native_stderr():
+            detector_outputs = [
+                detector.process(frame_rgb).detections
+                for detector in mp_face_detectors
+            ]
 
+        for detections in detector_outputs:
             if not detections:
                 continue
 
