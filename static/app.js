@@ -56,7 +56,7 @@ function updateResults(faces) {
 
     if (!faces.length) {
         liveResults.classList.add("empty");
-        liveResults.textContent = "Wajah belum terdeteksi.";
+        liveResults.textContent = "Wajah manusia belum terdeteksi.";
         setLiveSignal(stream ? "Scanning" : "Standby");
         return;
     }

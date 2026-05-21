@@ -472,11 +472,9 @@ def detect_faces_haar_bgr(frame_bgr):
 
 
 def detect_faces_bgr(frame_bgr):
-    """Deteksi wajah dari frame BGR memakai MediaPipe, fallback ke Haar Cascade."""
-    faces = detect_faces_mediapipe_bgr(frame_bgr)
-
-    if faces:
-        return faces
+    """Deteksi wajah manusia dari frame BGR."""
+    if mp_face_detector is not None:
+        return detect_faces_mediapipe_bgr(frame_bgr)
 
     return detect_faces_haar_bgr(frame_bgr)
 
@@ -540,7 +538,7 @@ def draw_prediction(frame_bgr, box, result):
     return frame_bgr
 
 
-def predict_faces_in_frame(frame_bgr, fallback_to_full_image=False):
+def predict_faces_in_frame(frame_bgr):
     faces = detect_faces_bgr(frame_bgr)
     predictions = []
 
@@ -570,15 +568,6 @@ def predict_faces_in_frame(frame_bgr, fallback_to_full_image=False):
         result["source"] = "face"
         result["quality_ok"] = True
         result["quality"] = quality
-        predictions.append(result)
-
-    if not predictions and fallback_to_full_image:
-        full_pil = Image.fromarray(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
-        result = predict_pil_image(full_pil)
-        height, width = frame_bgr.shape[:2]
-        result["box"] = {"x": 0, "y": 0, "width": width, "height": height}
-        result["source"] = "full_image"
-        result["quality_ok"] = True
         predictions.append(result)
 
     return predictions
@@ -729,7 +718,7 @@ def predict_upload():
     frame_bgr = pil_to_bgr(pil_img)
 
     try:
-        predictions = predict_faces_in_frame(frame_bgr, fallback_to_full_image=True)
+        predictions = predict_faces_in_frame(frame_bgr)
     except Exception as exc:
         return error_response(f"Gagal prediksi: {exc}", 500)
 
@@ -750,7 +739,7 @@ def predict_upload():
         predictions=predictions,
         image_data=encoded,
         face_count=face_count,
-        used_full_image=face_count == 0,
+        no_face_detected=face_count == 0,
     )
 
 
@@ -777,7 +766,7 @@ def predict_frame():
     frame_bgr = pil_to_bgr(pil_img)
 
     try:
-        predictions = predict_faces_in_frame(frame_bgr, fallback_to_full_image=False)
+        predictions = predict_faces_in_frame(frame_bgr)
     except Exception as exc:
         return jsonify({"ok": False, "error": f"Gagal prediksi: {exc}"}), 500
 

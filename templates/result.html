@@ -23,8 +23,8 @@
                 <div class="section-head">
                     <div>
                         <h2>Gambar Teranotasi</h2>
-                        {% if used_full_image %}
-                            <p>Wajah tidak terdeteksi, prediksi memakai gambar penuh.</p>
+                        {% if no_face_detected %}
+                            <p>Wajah manusia tidak terdeteksi, prediksi tidak dijalankan.</p>
                         {% else %}
                             <p>{{ face_count }} wajah terdeteksi.</p>
                         {% endif %}
@@ -45,23 +45,33 @@
                         </div>
                     </div>
                     <div class="result-list">
-                        {% for prediction in predictions %}
-                            <article class="result-item {{ 'warning' if prediction.quality_ok == false else '' }}">
-                                {% if prediction.quality_ok == false %}
-                                    <div>
-                                        <strong>Input belum layak</strong>
-                                        <span>{{ prediction.quality_message }}</span>
-                                    </div>
-                                    <span class="confidence warning">Cek kualitas</span>
-                                {% else %}
-                                    <div>
-                                        <strong>Gender: {{ prediction.gender }}</strong>
-                                        <span>Estimasi usia: {{ prediction.age_range }} tahun</span>
-                                    </div>
-                                    <span class="confidence">Confidence Gender {{ "%.1f"|format(prediction.confidence_percent) }}%</span>
-                                {% endif %}
+                        {% if no_face_detected %}
+                            <article class="result-item warning">
+                                <div>
+                                    <strong>Wajah tidak terdeteksi</strong>
+                                    <span>Gunakan gambar yang menampilkan wajah manusia dengan jelas.</span>
+                                </div>
+                                <span class="confidence warning">Tidak diprediksi</span>
                             </article>
-                        {% endfor %}
+                        {% else %}
+                            {% for prediction in predictions %}
+                                <article class="result-item {{ 'warning' if prediction.quality_ok == false else '' }}">
+                                    {% if prediction.quality_ok == false %}
+                                        <div>
+                                            <strong>Input belum layak</strong>
+                                            <span>{{ prediction.quality_message }}</span>
+                                        </div>
+                                        <span class="confidence warning">Cek kualitas</span>
+                                    {% else %}
+                                        <div>
+                                            <strong>Gender: {{ prediction.gender }}</strong>
+                                            <span>Estimasi usia: {{ prediction.age_range }} tahun</span>
+                                        </div>
+                                        <span class="confidence">Confidence Gender {{ "%.1f"|format(prediction.confidence_percent) }}%</span>
+                                    {% endif %}
+                                </article>
+                            {% endfor %}
+                        {% endif %}
                     </div>
                 </section>
             </aside>
