@@ -35,11 +35,16 @@ MAX_MODEL_UPLOAD_SIZE = 200 * 1024 * 1024
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
 ALLOWED_MODEL_EXTENSIONS = {"pth", "pt"}
 FACE_DETECTION_CONFIDENCE = 0.55
+MIN_MEDIAPIPE_FACE_SCORE = 0.72
 QUALITY_GATE_ENABLED = True
 MIN_FACE_AREA_RATIO = 0.018
 MIN_FACE_BRIGHTNESS = 45.0
 MAX_FACE_BRIGHTNESS = 225.0
 MIN_FACE_SHARPNESS = 28.0
+MIN_REAL_FACE_SKIN_RATIO = 0.035
+MAX_LINE_ART_WHITE_RATIO = 0.42
+MIN_LINE_ART_EDGE_DENSITY = 0.018
+MAX_LINE_ART_SATURATION = 42.0
 AGE_CALIBRATION_SCALE = 1.0
 AGE_CALIBRATION_OFFSET = 0.0
 
@@ -404,8 +409,30 @@ def evaluate_face_quality(frame_bgr, crop_bgr, box):
     face_area_ratio = (w * h) / frame_area
 
     gray_crop = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2GRAY)
+    hsv_crop = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2HSV)
+    ycrcb_crop = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2YCrCb)
+
     brightness = float(np.mean(gray_crop))
     sharpness = float(cv2.Laplacian(gray_crop, cv2.CV_64F).var())
+    saturation = float(np.mean(hsv_crop[:, :, 1]))
+    white_ratio = float(np.mean((gray_crop > 235) & (hsv_crop[:, :, 1] < 45)))
+    edges = cv2.Canny(gray_crop, 80, 160)
+    edge_density = float(np.mean(edges > 0))
+
+    y_channel, cr_channel, cb_channel = cv2.split(ycrcb_crop)
+    skin_mask = (
+        (y_channel > 40)
+        & (cr_channel >= 133)
+        & (cr_channel <= 180)
+        & (cb_channel >= 75)
+        & (cb_channel <= 135)
+    )
+    skin_ratio = float(np.mean(skin_mask))
+    looks_like_line_art = (
+        white_ratio > MAX_LINE_ART_WHITE_RATIO
+        and edge_density > MIN_LINE_ART_EDGE_DENSITY
+        and saturation < MAX_LINE_ART_SATURATION
+    )
 
     issues = []
     if face_area_ratio < MIN_FACE_AREA_RATIO:
@@ -416,6 +443,10 @@ def evaluate_face_quality(frame_bgr, crop_bgr, box):
         issues.append("Pencahayaan terlalu terang")
     if sharpness < MIN_FACE_SHARPNESS:
         issues.append("Wajah terlalu blur")
+    if looks_like_line_art:
+        issues.append("Gunakan foto wajah manusia, bukan gambar/coretan")
+    elif skin_ratio < MIN_REAL_FACE_SKIN_RATIO and saturation < MAX_LINE_ART_SATURATION:
+        issues.append("Wajah manusia belum cukup jelas")
 
     return {
         "ok": len(issues) == 0,
@@ -424,6 +455,10 @@ def evaluate_face_quality(frame_bgr, crop_bgr, box):
         "brightness": round(brightness, 1),
         "sharpness": round(sharpness, 1),
         "face_area_ratio": round(face_area_ratio, 4),
+        "saturation": round(saturation, 1),
+        "white_ratio": round(white_ratio, 4),
+        "edge_density": round(edge_density, 4),
+        "skin_ratio": round(skin_ratio, 4),
     }
 
 
@@ -445,6 +480,10 @@ def detect_faces_mediapipe_bgr(frame_bgr):
     faces = []
 
     for detection in detections:
+        score = float(detection.score[0]) if detection.score else 0.0
+        if score < MIN_MEDIAPIPE_FACE_SCORE:
+            continue
+
         relative_box = detection.location_data.relative_bounding_box
         x = relative_box.xmin * width
         y = relative_box.ymin * height
@@ -732,14 +771,19 @@ def predict_upload():
         )
 
     encoded = frame_to_base64(annotated_frame)
-    face_count = sum(1 for prediction in predictions if prediction["source"] == "face")
+    face_count = sum(
+        1
+        for prediction in predictions
+        if prediction["source"] == "face" and prediction.get("quality_ok", True)
+    )
 
     return render_template(
         "result.html",
         predictions=predictions,
         image_data=encoded,
         face_count=face_count,
-        no_face_detected=face_count == 0,
+        no_face_detected=len(predictions) == 0,
+        only_rejected_faces=len(predictions) > 0 and face_count == 0,
     )
 
 

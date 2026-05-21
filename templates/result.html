@@ -25,6 +25,8 @@
                         <h2>Gambar Teranotasi</h2>
                         {% if no_face_detected %}
                             <p>Wajah manusia tidak terdeteksi, prediksi tidak dijalankan.</p>
+                        {% elif only_rejected_faces %}
+                            <p>Wajah belum lolos filter foto manusia, prediksi tidak dijalankan.</p>
                         {% else %}
                             <p>{{ face_count }} wajah terdeteksi.</p>
                         {% endif %}
