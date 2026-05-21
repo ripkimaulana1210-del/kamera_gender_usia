@@ -5,7 +5,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from PIL import Image, ImageOps
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, redirect, render_template, request, url_for
 
 try:
     import mediapipe as mp
@@ -21,7 +21,9 @@ from torchvision import models
 # KONFIGURASI DASAR
 # =====================================================
 BASE_DIR = Path(__file__).resolve().parent
-MODEL_PATH = BASE_DIR / "models" / "final_gender_age_model.pth"
+MODEL_DIR = BASE_DIR / "models"
+MODEL_DIR.mkdir(exist_ok=True)
+UPLOADED_MODEL_PATH = MODEL_DIR / "uploaded_gender_age_model.pth"
 
 IMAGE_SIZE = 128
 AGE_MAX = 116.0
@@ -29,7 +31,9 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 GENDER_LABELS = ["Laki-laki", "Perempuan"]
 FACE_MARGIN = 30
 MAX_UPLOAD_SIZE = 8 * 1024 * 1024
+MAX_MODEL_UPLOAD_SIZE = 200 * 1024 * 1024
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
+ALLOWED_MODEL_EXTENSIONS = {"pth", "pt"}
 FACE_DETECTION_CONFIDENCE = 0.55
 QUALITY_GATE_ENABLED = True
 MIN_FACE_AREA_RATIO = 0.018
@@ -123,16 +127,32 @@ class ResNet18MultiTask(nn.Module):
 
 
 # =====================================================
-# LOAD MODEL FINAL
+# LOAD MODEL DARI UPLOAD
 # =====================================================
-def load_final_model():
-    global IMAGE_SIZE, AGE_MAX, GENDER_LABELS
+def load_checkpoint(model_path: Path):
+    try:
+        return torch.load(model_path, map_location=DEVICE, weights_only=False)
+    except TypeError:
+        return torch.load(model_path, map_location=DEVICE)
 
-    if not MODEL_PATH.exists():
-        return None, f"Model belum ditemukan: {MODEL_PATH}"
+
+def build_transform(image_size: int):
+    return T.Compose([
+        T.Resize((image_size, image_size)),
+        T.ToTensor(),
+        T.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225],
+        ),
+    ])
+
+
+def load_model_from_file(model_path: Path):
+    if not model_path.exists():
+        return None, None, f"Model belum ditemukan: {model_path}"
 
     try:
-        checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
+        checkpoint = load_checkpoint(model_path)
 
         # Format yang disarankan dari notebook:
         # torch.save({
@@ -141,46 +161,69 @@ def load_final_model():
         #     "image_size": IMAGE_SIZE,
         #     "age_max": AGE_MAX,
         #     "gender_labels": ["Laki-laki", "Perempuan"],
-        # }, MODEL_PATH)
+        # }, path_model)
+
+        image_size = IMAGE_SIZE
+        age_max = AGE_MAX
+        gender_labels = list(GENDER_LABELS)
 
         if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
             model_name = checkpoint.get("model_name", "ResNet18")
             state_dict = checkpoint["model_state_dict"]
-            IMAGE_SIZE = int(checkpoint.get("image_size", IMAGE_SIZE))
-            AGE_MAX = float(checkpoint.get("age_max", AGE_MAX))
-            GENDER_LABELS = checkpoint.get("gender_labels", GENDER_LABELS)
+            image_size = int(checkpoint.get("image_size", image_size))
+            age_max = float(checkpoint.get("age_max", age_max))
+            gender_labels = checkpoint.get("gender_labels", gender_labels)
         else:
             # Fallback kalau file .pth hanya berisi state_dict.
             model_name = "ResNet18"
             state_dict = checkpoint
 
+        if not isinstance(gender_labels, (list, tuple)) or len(gender_labels) < 2:
+            gender_labels = ["Laki-laki", "Perempuan"]
+        gender_labels = [str(gender_labels[0]), str(gender_labels[1])]
+
         if str(model_name).lower().startswith("simple"):
-            model = SimpleCNN(age_max=AGE_MAX)
+            model = SimpleCNN(age_max=age_max)
         else:
-            model = ResNet18MultiTask(pretrained=False, age_max=AGE_MAX)
+            model = ResNet18MultiTask(pretrained=False, age_max=age_max)
 
         model.load_state_dict(state_dict, strict=True)
         model.to(DEVICE)
         model.eval()
 
-        return model, None
+        metadata = {
+            "model_name": str(model_name),
+            "image_size": image_size,
+            "age_max": age_max,
+            "gender_labels": gender_labels,
+        }
+        return model, metadata, None
 
     except Exception as exc:
-        return None, f"Gagal load model: {exc}"
+        return None, None, f"Gagal load model: {exc}"
 
 
-MODEL, MODEL_ERROR = load_final_model()
+MODEL_LOCK = threading.Lock()
+MODEL = None
+MODEL_ERROR = "Upload file model .pth atau .pt terlebih dahulu."
+MODEL_NAME = None
+MODEL_SOURCE = None
+transform = build_transform(IMAGE_SIZE)
 
 
-# Transform harus dibuat setelah load model, karena IMAGE_SIZE bisa berubah dari checkpoint.
-transform = T.Compose([
-    T.Resize((IMAGE_SIZE, IMAGE_SIZE)),
-    T.ToTensor(),
-    T.Normalize(
-        mean=[0.485, 0.456, 0.406],
-        std=[0.229, 0.224, 0.225],
-    ),
-])
+def activate_model(model, metadata, source_name):
+    global IMAGE_SIZE, AGE_MAX, GENDER_LABELS, transform
+    global MODEL, MODEL_ERROR, MODEL_NAME, MODEL_SOURCE
+
+    with MODEL_LOCK:
+        IMAGE_SIZE = int(metadata["image_size"])
+        AGE_MAX = float(metadata["age_max"])
+        GENDER_LABELS = list(metadata["gender_labels"])
+        transform = build_transform(IMAGE_SIZE)
+        MODEL = model
+        MODEL_ERROR = None
+        MODEL_NAME = metadata["model_name"]
+        MODEL_SOURCE = source_name
 
 
 # =====================================================
@@ -215,7 +258,7 @@ except Exception as exc:
     face_detector_error = f"Gagal inisialisasi MediaPipe: {exc}"
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_SIZE
+app.config["MAX_CONTENT_LENGTH"] = MAX_MODEL_UPLOAD_SIZE
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 
@@ -227,6 +270,57 @@ def allowed_file(filename):
         return False
     extension = filename.rsplit(".", 1)[1].lower()
     return extension in ALLOWED_EXTENSIONS
+
+
+def allowed_model_file(filename):
+    if not filename or "." not in filename:
+        return False
+    extension = filename.rsplit(".", 1)[1].lower()
+    return extension in ALLOWED_MODEL_EXTENSIONS
+
+
+def get_uploaded_size(file_storage):
+    try:
+        current_position = file_storage.stream.tell()
+        file_storage.stream.seek(0, 2)
+        size = file_storage.stream.tell()
+        file_storage.stream.seek(current_position)
+        return size
+    except (AttributeError, OSError):
+        return None
+
+
+def clean_filename(filename):
+    return Path(str(filename).replace("\\", "/")).name
+
+
+def get_model_status():
+    with MODEL_LOCK:
+        model_ready = MODEL is not None
+        model_error = MODEL_ERROR
+        model_name = MODEL_NAME
+        model_source = MODEL_SOURCE
+        image_size = IMAGE_SIZE
+        age_max = AGE_MAX
+        gender_labels = list(GENDER_LABELS)
+
+    if model_ready:
+        shown_name = model_name or "Model"
+        source_text = f" dari {model_source}" if model_source else ""
+        model_status = f"{shown_name} siap digunakan{source_text}"
+    else:
+        model_status = f"Model belum siap: {model_error}"
+
+    return {
+        "model_ready": model_ready,
+        "model_error": model_error,
+        "model_name": model_name,
+        "model_source": model_source,
+        "model_status": model_status,
+        "image_size": image_size,
+        "age_max": age_max,
+        "gender_labels": gender_labels,
+    }
 
 
 def add_margin_to_box(x, y, w, h, frame_shape, margin=FACE_MARGIN):
@@ -264,29 +358,37 @@ def clamp_face_box(x, y, w, h, frame_shape):
     return x1, y1, x2 - x1, y2 - y1
 
 
-def calibrate_age(age):
+def calibrate_age(age, age_max=None):
+    max_age = AGE_MAX if age_max is None else age_max
     corrected_age = age * AGE_CALIBRATION_SCALE + AGE_CALIBRATION_OFFSET
-    return max(0.0, min(float(corrected_age), AGE_MAX))
+    return max(0.0, min(float(corrected_age), max_age))
 
 
 def predict_pil_image(pil_img: Image.Image):
     """Prediksi gender dan usia dari satu gambar PIL."""
-    if MODEL is None:
-        raise RuntimeError(MODEL_ERROR or "Model belum siap.")
+    with MODEL_LOCK:
+        model = MODEL
+        model_error = MODEL_ERROR
+        active_transform = transform
+        gender_labels = list(GENDER_LABELS)
+        age_max = AGE_MAX
+
+    if model is None:
+        raise RuntimeError(model_error or "Model belum siap.")
 
     img = pil_img.convert("RGB")
     augmented_images = [img, ImageOps.mirror(img)]
-    x = torch.stack([transform(aug_img) for aug_img in augmented_images]).to(DEVICE)
+    x = torch.stack([active_transform(aug_img) for aug_img in augmented_images]).to(DEVICE)
 
     with torch.inference_mode():
-        gender_logits, age_pred = MODEL(x)
+        gender_logits, age_pred = model(x)
         prob = torch.softmax(gender_logits, dim=1).mean(dim=0)
         gender_idx = int(torch.argmax(prob).item())
         confidence = float(prob[gender_idx].item())
-        age = calibrate_age(float(age_pred.mean().item()))
+        age = calibrate_age(float(age_pred.mean().item()), age_max=age_max)
 
     return {
-        "gender": GENDER_LABELS[gender_idx],
+        "gender": gender_labels[gender_idx],
         "gender_index": gender_idx,
         "confidence": round(confidence, 4),
         "confidence_percent": round(confidence * 100, 1),
@@ -504,7 +606,7 @@ def error_response(message, status_code):
 # =====================================================
 @app.after_request
 def add_no_cache_headers(response):
-    if request.endpoint in {"index", "predict_upload"} or request.path.startswith("/static/"):
+    if request.endpoint in {"index", "predict_upload", "upload_model"} or request.path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
@@ -516,15 +618,16 @@ def add_no_cache_headers(response):
 # =====================================================
 @app.route("/")
 def index():
-    model_status = "Model siap digunakan" if MODEL is not None else f"Model belum siap: {MODEL_ERROR}"
+    runtime = get_model_status()
 
     return render_template(
         "index.html",
-        model_ready=MODEL is not None,
-        model_status=model_status,
+        model_ready=runtime["model_ready"],
+        model_status=runtime["model_status"],
         device=str(DEVICE),
-        image_size=IMAGE_SIZE,
+        image_size=runtime["image_size"],
         max_upload_mb=MAX_UPLOAD_SIZE // (1024 * 1024),
+        max_model_upload_mb=MAX_MODEL_UPLOAD_SIZE // (1024 * 1024),
         face_detector=face_detector_name,
         face_detector_error=face_detector_error,
     )
@@ -532,14 +635,18 @@ def index():
 
 @app.route("/status")
 def status():
+    runtime = get_model_status()
+
     return jsonify({
-        "model_ready": MODEL is not None,
-        "model_path": str(MODEL_PATH),
-        "model_error": MODEL_ERROR,
+        "model_ready": runtime["model_ready"],
+        "model_name": runtime["model_name"],
+        "model_source": runtime["model_source"],
+        "uploaded_model_path": str(UPLOADED_MODEL_PATH),
+        "model_error": runtime["model_error"],
         "device": str(DEVICE),
-        "image_size": IMAGE_SIZE,
-        "age_max": AGE_MAX,
-        "gender_labels": GENDER_LABELS,
+        "image_size": runtime["image_size"],
+        "age_max": runtime["age_max"],
+        "gender_labels": runtime["gender_labels"],
         "face_detector": face_detector_name,
         "face_detector_error": face_detector_error,
         "face_detection_confidence": FACE_DETECTION_CONFIDENCE,
@@ -557,14 +664,63 @@ def status():
     })
 
 
+@app.route("/model/upload", methods=["POST"])
+def upload_model():
+    if "model_file" not in request.files:
+        return error_response("File model belum dipilih.", 400)
+
+    file = request.files["model_file"]
+    original_filename = clean_filename(file.filename)
+
+    if not original_filename:
+        return error_response("File model belum dipilih.", 400)
+
+    if not allowed_model_file(original_filename):
+        return error_response("Format model harus .pth atau .pt.", 400)
+
+    uploaded_size = get_uploaded_size(file)
+    if uploaded_size is not None and uploaded_size > MAX_MODEL_UPLOAD_SIZE:
+        max_mb = MAX_MODEL_UPLOAD_SIZE // (1024 * 1024)
+        return error_response(f"Ukuran file model maksimal {max_mb} MB.", 413)
+
+    temp_path = MODEL_DIR / "_uploaded_model_tmp.pth"
+
+    try:
+        file.save(temp_path)
+        loaded_model, metadata, model_error = load_model_from_file(temp_path)
+
+        if model_error is not None:
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+            return error_response(model_error, 400)
+
+        temp_path.replace(UPLOADED_MODEL_PATH)
+        activate_model(loaded_model, metadata, original_filename)
+    except Exception as exc:
+        return error_response(f"Gagal upload model: {exc}", 500)
+
+    return redirect(url_for("index"))
+
+
 @app.route("/predict", methods=["POST"])
 def predict_upload():
+    runtime = get_model_status()
+    if not runtime["model_ready"]:
+        return error_response(runtime["model_status"], 400)
+
     if "image" not in request.files:
         return error_response("File gambar belum dipilih.", 400)
 
     file = request.files["image"]
     if not allowed_file(file.filename):
         return error_response("Format gambar harus JPG, JPEG, PNG, atau WEBP.", 400)
+
+    uploaded_size = get_uploaded_size(file)
+    if uploaded_size is not None and uploaded_size > MAX_UPLOAD_SIZE:
+        max_mb = MAX_UPLOAD_SIZE // (1024 * 1024)
+        return error_response(f"Ukuran file gambar maksimal {max_mb} MB.", 413)
 
     try:
         pil_img = read_image_file(file)
@@ -601,10 +757,18 @@ def predict_upload():
 
 @app.route("/api/predict-frame", methods=["POST"])
 def predict_frame():
+    runtime = get_model_status()
+    if not runtime["model_ready"]:
+        return jsonify({"ok": False, "error": runtime["model_status"], "model_ready": False}), 400
+
     if "frame" not in request.files:
         return jsonify({"ok": False, "error": "Frame kamera belum terkirim."}), 400
 
     file = request.files["frame"]
+    uploaded_size = get_uploaded_size(file)
+    if uploaded_size is not None and uploaded_size > MAX_UPLOAD_SIZE:
+        max_mb = MAX_UPLOAD_SIZE // (1024 * 1024)
+        return jsonify({"ok": False, "error": f"Ukuran frame maksimal {max_mb} MB."}), 413
 
     try:
         pil_img = read_image_file(file)
@@ -626,14 +790,14 @@ def predict_frame():
         "face_count": len(predictions),
         "image_width": width,
         "image_height": height,
-        "model_ready": MODEL is not None,
+        "model_ready": True,
         "face_detector": face_detector_name,
     })
 
 
 @app.errorhandler(413)
 def request_entity_too_large(_exc):
-    return error_response(f"Ukuran file maksimal {MAX_UPLOAD_SIZE // (1024 * 1024)} MB.", 413)
+    return error_response(f"Ukuran request maksimal {MAX_MODEL_UPLOAD_SIZE // (1024 * 1024)} MB.", 413)
 
 
 # =====================================================

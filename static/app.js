@@ -8,6 +8,8 @@ const cameraMode = document.getElementById("cameraMode");
 const cameraStatus = document.getElementById("cameraStatus");
 const faceCounter = document.getElementById("faceCounter");
 const liveResults = document.getElementById("liveResults");
+const modelInput = document.getElementById("modelInput");
+const modelFileName = document.getElementById("modelFileName");
 const imageInput = document.getElementById("imageInput");
 const fileName = document.getElementById("fileName");
 const refreshStatus = document.getElementById("refreshStatus");
@@ -296,6 +298,11 @@ cameraMode.addEventListener("change", () => {
 imageInput.addEventListener("change", () => {
     const file = imageInput.files[0];
     fileName.textContent = file ? file.name : "JPG, PNG, WEBP";
+});
+
+modelInput.addEventListener("change", () => {
+    const file = modelInput.files[0];
+    modelFileName.textContent = file ? file.name : "PTH atau PT";
 });
 
 window.addEventListener("resize", () => drawOverlay(lastResponse));

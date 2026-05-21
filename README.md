@@ -7,7 +7,7 @@ Project final UAS ini menggunakan PyTorch untuk training model CNN dan Flask unt
 - `kamera gender dan usia.ipynb`: notebook training di Kaggle.
 - `app.py`: aplikasi Flask untuk VS Code.
 - `requirements.txt`: dependency aplikasi.
-- `models/`: folder model final `final_gender_age_model.pth`.
+- `models/`: folder penyimpanan model yang diupload dari aplikasi.
 
 ## Alur Sesuai Panduan UAS
 
@@ -30,13 +30,7 @@ Project final UAS ini menggunakan PyTorch untuk training model CNN dan Flask unt
 
 ## Cara Menjalankan App di VS Code
 
-Masukkan model hasil Kaggle ke:
-
-```text
-models/final_gender_age_model.pth
-```
-
-Lalu jalankan:
+Jalankan aplikasi:
 
 ```bash
 python -m venv venv
@@ -50,6 +44,8 @@ Buka browser:
 ```text
 http://127.0.0.1:5000
 ```
+
+Upload file model `.pth` atau `.pt` dari halaman aplikasi terlebih dahulu. Setelah model siap, kamera dan upload gambar bisa digunakan untuk prediksi.
 
 ## Catatan
 

@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Deteksi Gender dan Estimasi Usia</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260508-accuracy2">
-    <script defer src="{{ url_for('static', filename='app.js') }}?v=20260508-accuracy2"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260521-model-upload">
+    <script defer src="{{ url_for('static', filename='app.js') }}?v=20260521-model-upload"></script>
 </head>
 <body>
     <header class="app-header">
@@ -70,7 +70,7 @@
                 </div>
 
                 <div class="camera-controls">
-                    <button id="startCamera" type="button" class="primary">Mulai Kamera</button>
+                    <button id="startCamera" type="button" class="primary" {% if not model_ready %}disabled{% endif %}>Mulai Kamera</button>
                     <button id="stopCamera" type="button" class="secondary" disabled>Matikan Kamera</button>
                 </div>
 
@@ -86,6 +86,24 @@
                 <section class="panel-card">
                     <div class="section-head compact">
                         <div>
+                            <h2>Upload Model</h2>
+                            <p>File model hasil training.</p>
+                        </div>
+                    </div>
+
+                    <form action="{{ url_for('upload_model') }}" method="post" enctype="multipart/form-data" class="upload-form">
+                        <label class="file-drop" for="modelInput">
+                            <span class="file-title">Pilih model</span>
+                            <span id="modelFileName" class="file-name">PTH atau PT sampai {{ max_model_upload_mb }} MB</span>
+                        </label>
+                        <input id="modelInput" type="file" name="model_file" accept=".pth,.pt" required>
+                        <button type="submit" class="primary full">Muat Model</button>
+                    </form>
+                </section>
+
+                <section class="panel-card">
+                    <div class="section-head compact">
+                        <div>
                             <h2>Upload Gambar</h2>
                             <p>Prediksi dari file gambar.</p>
                         </div>
@@ -97,7 +115,7 @@
                             <span id="fileName" class="file-name">JPG, PNG, WEBP sampai {{ max_upload_mb }} MB</span>
                         </label>
                         <input id="imageInput" type="file" name="image" accept="image/*" required>
-                        <button type="submit" class="primary full">Prediksi Upload</button>
+                        <button type="submit" class="primary full" {% if not model_ready %}disabled{% endif %}>Prediksi Upload</button>
                     </form>
                 </section>
 
