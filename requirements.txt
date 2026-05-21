@@ -1,8 +1,8 @@
 flask
-opencv-contrib-python
+opencv-contrib-python<=4.10.0.84
 mediapipe==0.10.14
 pillow
-numpy
+numpy<2
 torch
 torchvision
 scikit-learn
