@@ -149,9 +149,9 @@ function drawOverlay(response) {
 
     response.faces.forEach((face) => {
         const box = face.box;
-        const x = box.x * scaleX;
-        const y = box.y * scaleY;
         const boxWidth = box.width * scaleX;
+        const x = width - ((box.x * scaleX) + boxWidth);
+        const y = box.y * scaleY;
         const boxHeight = box.height * scaleY;
         const isQualityWarning = face.quality_ok === false;
         const genderLabel = isQualityWarning
@@ -208,7 +208,7 @@ async function startCamera() {
 
         video.srcObject = stream;
         video.style.transform = "scaleX(-1)";
-        overlay.style.transform = "scaleX(-1)";
+        overlay.style.transform = "none";
         await video.play();
 
         cameraStage.classList.add("active");
