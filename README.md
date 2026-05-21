@@ -4,7 +4,7 @@ Project final UAS ini menggunakan PyTorch untuk training model CNN dan Flask unt
 
 ## Isi Project
 
-- `final_kaggle_gender_age_pytorch_cnn.ipynb`: notebook training di Kaggle.
+- `kamera gender dan usia.ipynb`: notebook training di Kaggle.
 - `app.py`: aplikasi Flask untuk VS Code.
 - `requirements.txt`: dependency aplikasi.
 - `models/`: folder model final `final_gender_age_model.pth`.
@@ -22,7 +22,7 @@ Project final UAS ini menggunakan PyTorch untuk training model CNN dan Flask unt
 
 ## Cara Training di Kaggle
 
-1. Upload/import `final_kaggle_gender_age_pytorch_cnn.ipynb` ke Kaggle.
+1. Upload/import `kamera gender dan usia.ipynb` ke Kaggle.
 2. Klik `Add Data`, tambahkan dataset UTKFace.
 3. Aktifkan GPU: `Settings -> Accelerator -> GPU`.
 4. Jalankan notebook dari atas ke bawah.
