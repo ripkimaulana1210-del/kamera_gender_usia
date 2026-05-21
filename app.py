@@ -567,9 +567,10 @@ def detect_faces_bgr(frame_bgr):
     return merge_face_boxes(faces)
 
 
-def format_age_range(age, span=4):
-    low = max(0, int(round(age - span)))
-    high = int(round(age + span))
+def format_age_range(age, max_width=5):
+    center = int(round(age))
+    low = max(0, center - (max_width // 2))
+    high = low + max_width
     return f"{low}-{high}"
 
 

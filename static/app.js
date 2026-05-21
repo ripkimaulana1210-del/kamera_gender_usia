@@ -85,9 +85,10 @@ function updateResults(faces) {
     `).join("");
 }
 
-function formatAgeRange(age, span = 4) {
-    const low = Math.max(0, Math.round(age - span));
-    const high = Math.round(age + span);
+function formatAgeRange(age, maxWidth = 5) {
+    const center = Math.round(age);
+    const low = Math.max(0, center - Math.floor(maxWidth / 2));
+    const high = low + maxWidth;
     return `${low}-${high}`;
 }
 
