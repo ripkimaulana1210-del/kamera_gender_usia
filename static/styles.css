@@ -723,7 +723,8 @@ select {
     max-height: min(70vh, 720px);
     background: #07111f;
     object-fit: cover;
-    transform: none;
+    transform: scaleX(-1);
+    transform-origin: center;
 }
 
 .stage-corners {
@@ -773,6 +774,8 @@ select {
     width: 100%;
     height: 100%;
     pointer-events: none;
+    transform: scaleX(-1);
+    transform-origin: center;
 }
 
 .camera-hud {
