@@ -1,15 +1,6 @@
-import atexit
 import base64
-import logging
-import os
 import threading
-import time
-from contextlib import contextmanager
 from pathlib import Path
-
-# Kurangi log native MediaPipe/TensorFlow Lite yang tidak memengaruhi hasil deteksi.
-os.environ.setdefault("GLOG_minloglevel", "2")
-os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 
 import cv2
 import numpy as np
@@ -18,39 +9,8 @@ from flask import Flask, jsonify, redirect, render_template, request, url_for
 
 try:
     import mediapipe as mp
-    from absl import logging as absl_logging
-
-    absl_logging.set_verbosity(absl_logging.ERROR)
-    absl_logging.set_stderrthreshold("error")
 except ImportError:
     mp = None
-
-
-@contextmanager
-def suppress_native_stderr():
-    stderr_fd = 2
-    saved_stderr_fd = os.dup(stderr_fd)
-
-    try:
-        with open(os.devnull, "w") as devnull:
-            os.dup2(devnull.fileno(), stderr_fd)
-            yield
-    finally:
-        os.dup2(saved_stderr_fd, stderr_fd)
-        os.close(saved_stderr_fd)
-
-
-def close_mediapipe_detectors():
-    if not globals().get("mp_face_detectors"):
-        return
-
-    with suppress_native_stderr():
-        for detector in mp_face_detectors:
-            try:
-                detector.close()
-            except Exception:
-                pass
-
 
 import torch
 import torch.nn as nn
@@ -65,18 +25,17 @@ MODEL_DIR = BASE_DIR / "models"
 MODEL_DIR.mkdir(exist_ok=True)
 UPLOADED_MODEL_PATH = MODEL_DIR / "uploaded_gender_age_model.pth"
 
-IMAGE_SIZE = 224
+IMAGE_SIZE = 128
 AGE_MAX = 116.0
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 GENDER_LABELS = ["Laki-laki", "Perempuan"]
 FACE_MARGIN = 30
-MAX_FACE_PREDICTIONS = 5
 MAX_UPLOAD_SIZE = 8 * 1024 * 1024
 MAX_MODEL_UPLOAD_SIZE = 200 * 1024 * 1024
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
 ALLOWED_MODEL_EXTENSIONS = {"pth", "pt"}
 FACE_DETECTION_CONFIDENCE = 0.55
-MIN_MEDIAPIPE_FACE_SCORE = 0.55
+MIN_MEDIAPIPE_FACE_SCORE = 0.72
 QUALITY_GATE_ENABLED = True
 MIN_FACE_AREA_RATIO = 0.018
 MIN_FACE_BRIGHTNESS = 45.0
@@ -282,7 +241,6 @@ face_detector_lock = threading.Lock()
 face_detector_name = "OpenCV Haar Cascade"
 face_detector_error = None
 mp_face_detector = None
-mp_face_detectors = []
 
 try:
     has_mediapipe_face_detection = (
@@ -292,25 +250,11 @@ try:
     )
 
     if has_mediapipe_face_detection:
-        with suppress_native_stderr():
-            mp_face_detectors = [
-                mp.solutions.face_detection.FaceDetection(
-                    model_selection=0,
-                    min_detection_confidence=FACE_DETECTION_CONFIDENCE,
-                ),
-                mp.solutions.face_detection.FaceDetection(
-                    model_selection=1,
-                    min_detection_confidence=FACE_DETECTION_CONFIDENCE,
-                ),
-            ]
-            warmup_frame = np.zeros((IMAGE_SIZE, IMAGE_SIZE, 3), dtype=np.uint8)
-            warmup_frame.flags.writeable = False
-            for detector in mp_face_detectors:
-                detector.process(warmup_frame)
-            time.sleep(0.5)
-        mp_face_detector = mp_face_detectors[0]
-        atexit.register(close_mediapipe_detectors)
-        face_detector_name = "MediaPipe Multi-Face + OpenCV Haar"
+        mp_face_detector = mp.solutions.face_detection.FaceDetection(
+            model_selection=0,
+            min_detection_confidence=FACE_DETECTION_CONFIDENCE,
+        )
+        face_detector_name = "MediaPipe Face Detection"
     elif mp is None:
         face_detector_error = "Package mediapipe belum terpasang."
     else:
@@ -321,7 +265,6 @@ except Exception as exc:
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_MODEL_UPLOAD_SIZE
 app.config["TEMPLATES_AUTO_RELOAD"] = True
-logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
 
 # =====================================================
@@ -418,43 +361,6 @@ def clamp_face_box(x, y, w, h, frame_shape):
         return None
 
     return x1, y1, x2 - x1, y2 - y1
-
-
-def box_area(box):
-    return max(int(box[2]), 0) * max(int(box[3]), 0)
-
-
-def box_iou(box_a, box_b):
-    ax, ay, aw, ah = [int(v) for v in box_a]
-    bx, by, bw, bh = [int(v) for v in box_b]
-
-    ax2, ay2 = ax + aw, ay + ah
-    bx2, by2 = bx + bw, by + bh
-
-    inter_x1 = max(ax, bx)
-    inter_y1 = max(ay, by)
-    inter_x2 = min(ax2, bx2)
-    inter_y2 = min(ay2, by2)
-
-    inter_w = max(0, inter_x2 - inter_x1)
-    inter_h = max(0, inter_y2 - inter_y1)
-    inter_area = inter_w * inter_h
-
-    union_area = box_area(box_a) + box_area(box_b) - inter_area
-    if union_area <= 0:
-        return 0.0
-
-    return inter_area / union_area
-
-
-def merge_face_boxes(face_boxes, iou_threshold=0.35):
-    merged = []
-
-    for box in sorted(face_boxes, key=box_area, reverse=True):
-        if all(box_iou(box, selected) < iou_threshold for selected in merged):
-            merged.append(tuple(int(v) for v in box))
-
-    return merged
 
 
 def calibrate_age(age, age_max=None):
@@ -558,71 +464,63 @@ def evaluate_face_quality(frame_bgr, crop_bgr, box):
 
 def detect_faces_mediapipe_bgr(frame_bgr):
     """Deteksi wajah dengan MediaPipe dan kembalikan box format OpenCV."""
-    if not mp_face_detectors:
+    if mp_face_detector is None:
         return []
 
     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
     frame_rgb.flags.writeable = False
 
+    with face_detector_lock:
+        detections = mp_face_detector.process(frame_rgb).detections
+
+    if not detections:
+        return []
+
     height, width = frame_bgr.shape[:2]
     faces = []
 
-    with face_detector_lock:
-        with suppress_native_stderr():
-            detector_outputs = [
-                detector.process(frame_rgb).detections
-                for detector in mp_face_detectors
-            ]
+    for detection in detections:
+        score = float(detection.score[0]) if detection.score else 0.0
+        if score < MIN_MEDIAPIPE_FACE_SCORE:
+            continue
 
-        for detections in detector_outputs:
-            if not detections:
-                continue
+        relative_box = detection.location_data.relative_bounding_box
+        x = relative_box.xmin * width
+        y = relative_box.ymin * height
+        w = relative_box.width * width
+        h = relative_box.height * height
+        box = clamp_face_box(x, y, w, h, frame_bgr.shape)
 
-            for detection in detections:
-                score = float(detection.score[0]) if detection.score else 0.0
-                if score < MIN_MEDIAPIPE_FACE_SCORE:
-                    continue
+        if box is not None:
+            faces.append(box)
 
-                relative_box = detection.location_data.relative_bounding_box
-                x = relative_box.xmin * width
-                y = relative_box.ymin * height
-                w = relative_box.width * width
-                h = relative_box.height * height
-                box = clamp_face_box(x, y, w, h, frame_bgr.shape)
-
-                if box is not None:
-                    faces.append(box)
-
-    return merge_face_boxes(faces)
+    return faces
 
 
 def detect_faces_haar_bgr(frame_bgr):
     """Deteksi wajah fallback dari frame BGR OpenCV."""
     gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
     gray = cv2.equalizeHist(gray)
-    min_side = min(frame_bgr.shape[:2])
-    min_face_size = max(36, int(min_side * 0.055))
     faces = face_cascade.detectMultiScale(
         gray,
-        scaleFactor=1.08,
-        minNeighbors=4,
-        minSize=(min_face_size, min_face_size),
+        scaleFactor=1.12,
+        minNeighbors=5,
+        minSize=(60, 60),
     )
     return [tuple(int(v) for v in face) for face in faces]
 
 
 def detect_faces_bgr(frame_bgr):
     """Deteksi wajah manusia dari frame BGR."""
-    faces = []
-    faces.extend(detect_faces_mediapipe_bgr(frame_bgr))
-    faces.extend(detect_faces_haar_bgr(frame_bgr))
-    return merge_face_boxes(faces)
+    if mp_face_detector is not None:
+        return detect_faces_mediapipe_bgr(frame_bgr)
+
+    return detect_faces_haar_bgr(frame_bgr)
 
 
-def format_age_range(age, max_width=5):
-    center = int(round(age))
-    low = max(0, center - (max_width // 2))
-    high = low + max_width
+def format_age_range(age, span=4):
+    low = max(0, int(round(age - span)))
+    high = int(round(age + span))
     return f"{low}-{high}"
 
 
@@ -682,13 +580,9 @@ def draw_prediction(frame_bgr, box, result):
 def predict_faces_in_frame(frame_bgr):
     faces = detect_faces_bgr(frame_bgr)
     predictions = []
-    rejected_predictions = []
 
     sorted_faces = sorted(faces, key=lambda f: int(f[2]) * int(f[3]), reverse=True)
     for face in sorted_faces:
-        if len(predictions) >= MAX_FACE_PREDICTIONS:
-            break
-
         x, y, w, h = [int(v) for v in face]
         x1, y1, x2, y2 = add_margin_to_box(x, y, w, h, frame_bgr.shape)
         crop = frame_bgr[y1:y2, x1:x2]
@@ -698,7 +592,7 @@ def predict_faces_in_frame(frame_bgr):
 
         quality = evaluate_face_quality(frame_bgr, crop, (x, y, w, h))
         if QUALITY_GATE_ENABLED and not quality["ok"]:
-            rejected_predictions.append({
+            predictions.append({
                 "box": {"x": x, "y": y, "width": w, "height": h},
                 "source": "face",
                 "quality_ok": False,
@@ -715,10 +609,7 @@ def predict_faces_in_frame(frame_bgr):
         result["quality"] = quality
         predictions.append(result)
 
-    if predictions:
-        return predictions
-
-    return rejected_predictions[:MAX_FACE_PREDICTIONS]
+    return predictions
 
 
 def read_image_file(file_storage):
@@ -786,7 +677,6 @@ def status():
         "face_detector": face_detector_name,
         "face_detector_error": face_detector_error,
         "face_detection_confidence": FACE_DETECTION_CONFIDENCE,
-        "max_face_predictions": MAX_FACE_PREDICTIONS,
         "quality_gate_enabled": QUALITY_GATE_ENABLED,
         "quality_thresholds": {
             "min_face_area_ratio": MIN_FACE_AREA_RATIO,
