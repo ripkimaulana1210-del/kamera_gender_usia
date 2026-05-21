@@ -723,6 +723,7 @@ select {
     max-height: min(70vh, 720px);
     background: #07111f;
     object-fit: cover;
+    transform: none;
 }
 
 .stage-corners {

@@ -377,15 +377,14 @@ def predict_pil_image(pil_img: Image.Image):
         raise RuntimeError(model_error or "Model belum siap.")
 
     img = pil_img.convert("RGB")
-    augmented_images = [img, ImageOps.mirror(img)]
-    x = torch.stack([active_transform(aug_img) for aug_img in augmented_images]).to(DEVICE)
+    x = active_transform(img).unsqueeze(0).to(DEVICE)
 
     with torch.inference_mode():
         gender_logits, age_pred = model(x)
-        prob = torch.softmax(gender_logits, dim=1).mean(dim=0)
+        prob = torch.softmax(gender_logits, dim=1)[0]
         gender_idx = int(torch.argmax(prob).item())
         confidence = float(prob[gender_idx].item())
-        age = calibrate_age(float(age_pred.mean().item()), age_max=age_max)
+        age = calibrate_age(float(age_pred[0].item()), age_max=age_max)
 
     return {
         "gender": gender_labels[gender_idx],

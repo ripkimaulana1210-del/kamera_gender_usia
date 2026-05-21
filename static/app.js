@@ -207,6 +207,8 @@ async function startCamera() {
         });
 
         video.srcObject = stream;
+        video.style.transform = "none";
+        overlay.style.transform = "none";
         await video.play();
 
         cameraStage.classList.add("active");
