@@ -47,6 +47,7 @@ MIN_LINE_ART_EDGE_DENSITY = 0.018
 MAX_LINE_ART_SATURATION = 42.0
 AGE_CALIBRATION_SCALE = 1.0
 AGE_CALIBRATION_OFFSET = 0.0
+AGE_RANGE_BUCKET_SIZE = 5
 
 
 # =====================================================
@@ -397,7 +398,7 @@ def predict_pil_image(pil_img: Image.Image):
         "confidence": round(confidence, 4),
         "confidence_percent": round(confidence * 100, 1),
         "age": round(age, 1),
-        "age_range": format_age_range(age),
+        "age_range": format_age_range(age, age_max=age_max),
     }
 
 
@@ -518,9 +519,12 @@ def detect_faces_bgr(frame_bgr):
     return detect_faces_haar_bgr(frame_bgr)
 
 
-def format_age_range(age, span=4):
-    low = max(0, int(round(age - span)))
-    high = int(round(age + span))
+def format_age_range(age, bucket_size=AGE_RANGE_BUCKET_SIZE, age_max=None):
+    max_age = AGE_MAX if age_max is None else age_max
+    safe_age = max(0.0, min(float(age), max_age))
+    safe_bucket_size = max(1, int(bucket_size))
+    low = int(safe_age // safe_bucket_size) * safe_bucket_size
+    high = min(low + safe_bucket_size - 1, int(round(max_age)))
     return f"{low}-{high}"
 
 
@@ -688,6 +692,7 @@ def status():
             "scale": AGE_CALIBRATION_SCALE,
             "offset": AGE_CALIBRATION_OFFSET,
         },
+        "age_range_bucket_size": AGE_RANGE_BUCKET_SIZE,
     })
 
 

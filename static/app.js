@@ -25,6 +25,7 @@ const liveSignal = document.getElementById("liveSignal");
 
 const captureCanvas = document.createElement("canvas");
 const SMOOTHING_WINDOW = 5;
+const AGE_RANGE_BUCKET_SIZE = 5;
 let modelReady = document.body.classList.contains("model-loaded");
 let stream = null;
 let predictInterval = null;
@@ -85,10 +86,33 @@ function updateResults(faces) {
     `).join("");
 }
 
-function formatAgeRange(age, span = 4) {
-    const low = Math.max(0, Math.round(age - span));
-    const high = Math.round(age + span);
+function formatAgeRange(age, bucketSize = AGE_RANGE_BUCKET_SIZE) {
+    const numericAge = Number(age);
+
+    if (!Number.isFinite(numericAge)) {
+        return "-";
+    }
+
+    const safeAge = Math.max(0, numericAge);
+    const safeBucketSize = Math.max(1, Number.parseInt(bucketSize, 10) || AGE_RANGE_BUCKET_SIZE);
+    const low = Math.floor(safeAge / safeBucketSize) * safeBucketSize;
+    const high = low + safeBucketSize - 1;
     return `${low}-${high}`;
+}
+
+function median(values) {
+    if (!values.length) {
+        return 0;
+    }
+
+    const sorted = [...values].sort((a, b) => a - b);
+    const middle = Math.floor(sorted.length / 2);
+
+    if (sorted.length % 2 === 1) {
+        return sorted[middle];
+    }
+
+    return (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
 function smoothFaces(faces) {
@@ -109,7 +133,7 @@ function smoothFaces(faces) {
         const history = [...previous, Number(face.age)].slice(-SMOOTHING_WINDOW);
         nextHistory[index] = history;
 
-        const smoothedAge = history.reduce((sum, age) => sum + age, 0) / history.length;
+        const smoothedAge = median(history);
 
         return {
             ...face,
